@@ -47,7 +47,7 @@ def get_video_info(url: str):
             for fmt in info.get('formats', []):
                 if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
                     altura = fmt.get('height', 0)
-                    
+
                     if altura and altura not in [f['altura'] for f in qualidades_video]:
                         descricao = descrever_qualidade_video(altura)
                         qualidades_video.append({
@@ -61,7 +61,7 @@ def get_video_info(url: str):
             for fmt in info.get('formats', []):
                 if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
                     abr = fmt.get('abr', fmt.get('tbr', 128))
-                    
+
                     if abr and abr not in [f['bitrate'] for f in qualidades_audio]:
                         descricao = descrever_qualidade_audio(abr)
                         qualidades_audio.append({
@@ -71,8 +71,10 @@ def get_video_info(url: str):
                         })
 
             # Ordenar
-            qualidades_video = sorted(qualidades_video, key=lambda x: x['altura'])
-            qualidades_audio = sorted(qualidades_audio, key=lambda x: x['bitrate'], reverse=True)
+            qualidades_video = sorted(
+                qualidades_video, key=lambda x: x['altura'])
+            qualidades_audio = sorted(
+                qualidades_audio, key=lambda x: x['bitrate'], reverse=True)
 
             return {
                 'titulo': titulo,
@@ -98,7 +100,7 @@ def download_video(url: str, format_id: str = "best"):
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                
+
                 # Pegar URL de streaming do vídeo
                 for fmt in info.get('formats', []):
                     if fmt.get('format_id') == format_id:
@@ -116,7 +118,8 @@ def download_video(url: str, format_id: str = "best"):
 
         titulo = obter_titulo_video(url)
         filename = f"{titulo}.mp4"
-        filename_safe = "".join(c for c in filename if c.isalnum() or c in (' ', '.', '-')).rstrip()
+        filename_safe = "".join(
+            c for c in filename if c.isalnum() or c in (' ', '.', '-')).rstrip()
 
         return StreamingResponse(
             gerar(),
@@ -141,6 +144,7 @@ def descrever_qualidade_video(altura):
     else:
         return "Qualidade top (4K)"
 
+
 def descrever_qualidade_audio(bitrate):
     """Descreve a qualidade do áudio de forma simples"""
     if bitrate < 96:
@@ -151,6 +155,7 @@ def descrever_qualidade_audio(bitrate):
         return "Áudio bom"
     else:
         return "Áudio top"
+
 
 def obter_titulo_video(url):
     """Pega o título do vídeo"""
@@ -168,4 +173,5 @@ def obter_titulo_video(url):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
