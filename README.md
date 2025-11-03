@@ -76,64 +76,6 @@ python -m http.server 8001
 2. Clique em "Compartilhar"
 3. Selecione "Adicionar à Tela Inicial"
 
-## 🌍 Opções de Deploy Online
-
-### Option 1: **Heroku** (Fácil, Gratuito até certo ponto)
-```bash
-# Criar Procfile na raiz
-echo "web: cd backend && uvicorn main:app --host=0.0.0.0 --port=\$PORT" > Procfile
-
-# Deploy
-git push heroku main
-```
-
-### Option 2: **Vercel** (Recomendado para Frontend)
-```bash
-# Só deploy do frontend estático (frontend/)
-# Conectar repositório GitHub e fazer deploy automático
-```
-
-### Option 3: **PythonAnywhere** (Para Backend Python)
-- Acesse: https://www.pythonanywhere.com
-- Fazer upload dos arquivos
-- Configurar app WSGI
-
-### Option 4: **Railway** (Simples e Rápido)
-- Conectar GitHub
-- Selecionar o repositório
-- Railway detecta automaticamente Python/FastAPI
-- Deploy automático
-
-### Option 5: **Replit** (Gratuito e Fácil)
-- Acesse: https://replit.com
-- Importar do GitHub
-- Run automático
-
-### Option 6: **VPS (DigitalOcean, Linode, AWS)**
-```bash
-# SSH na sua VPS
-ssh root@seu_ip
-
-# Clonar repositório
-git clone https://github.com/rodrigololr/Youtube-Downloader.git
-
-# Instalar Python
-apt-get install python3-pip python3-venv
-
-# Setup no servidor
-cd Youtube-Downloader
-python3 -m venv venv
-source venv/bin/activate
-pip install -r backend/requirements.txt
-
-# Usar Gunicorn + Nginx para produção
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:8000 backend.main:app
-
-# Configurar Nginx como reverse proxy
-# ... (documentação mais detalhada em outros recursos)
-```
-
 ## 📁 Estrutura do Projeto
 
 ```
