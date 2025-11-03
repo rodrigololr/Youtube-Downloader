@@ -1,11 +1,10 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 import os
-import json
-from pathlib import Path
+import io
 
 app = FastAPI()
 
@@ -18,11 +17,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pasta para downloads
-DOWNLOAD_FOLDER = "downloads"
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
-
 # Servir arquivos estáticos do frontend
 app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
@@ -34,7 +28,7 @@ def read_root():
 
 @app.get("/api/video-info")
 def get_video_info(url: str):
-    """Pega informações do vídeo (título, durações, qualidades)"""
+    """Pega informações do vídeo (título, duração, qualidades e áudio)"""
     try:
         ydl_opts = {
             'quiet': True,
@@ -45,81 +39,131 @@ def get_video_info(url: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            # Extrair informações importantes
             titulo = info.get('title', 'Vídeo')
             duracao = info.get('duration', 0)
 
-            # Pegar formatos disponíveis (qualidades)
-            formatos = []
+            # Pegar qualidades de VÍDEO
+            qualidades_video = []
             for fmt in info.get('formats', []):
                 if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
                     altura = fmt.get('height', 0)
-                    fps = fmt.get('fps', 30)
-
-                    if altura and altura not in [f['altura'] for f in formatos]:
-                        formatos.append({
+                    
+                    if altura and altura not in [f['altura'] for f in qualidades_video]:
+                        descricao = descrever_qualidade_video(altura)
+                        qualidades_video.append({
                             'altura': altura,
-                            'descricao': f"{altura}p",
-                            'tamanho_aprox': calcular_tamanho(duracao, altura),
+                            'descricao': descricao,
                             'format_id': fmt.get('format_id')
                         })
 
-            # Ordenar qualidades de menor para maior
-            formatos = sorted(formatos, key=lambda x: x['altura'])
+            # Pegar qualidades de ÁUDIO
+            qualidades_audio = []
+            for fmt in info.get('formats', []):
+                if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
+                    abr = fmt.get('abr', fmt.get('tbr', 128))
+                    
+                    if abr and abr not in [f['bitrate'] for f in qualidades_audio]:
+                        descricao = descrever_qualidade_audio(abr)
+                        qualidades_audio.append({
+                            'bitrate': abr,
+                            'descricao': descricao,
+                            'format_id': fmt.get('format_id')
+                        })
+
+            # Ordenar
+            qualidades_video = sorted(qualidades_video, key=lambda x: x['altura'])
+            qualidades_audio = sorted(qualidades_audio, key=lambda x: x['bitrate'], reverse=True)
 
             return {
                 'titulo': titulo,
                 'duracao': duracao,
-                'qualidades': formatos
+                'qualidades_video': qualidades_video,
+                'qualidades_audio': qualidades_audio
             }
     except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Erro ao processar vídeo: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Erro: {str(e)}")
 
 
 @app.get("/api/download")
-def download_video(url: str, qualidade: str = "best"):
-    """Faz download do vídeo na qualidade especificada"""
+def download_video(url: str, format_id: str = "best"):
+    """Faz streaming do vídeo direto para o usuário"""
+    try:
+        def gerar():
+            ydl_opts = {
+                'format': format_id,
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 30,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                # Pegar URL de streaming do vídeo
+                for fmt in info.get('formats', []):
+                    if fmt.get('format_id') == format_id:
+                        stream_url = fmt.get('url')
+                        if stream_url:
+                            # Fazer requisição ao stream
+                            import urllib.request
+                            with urllib.request.urlopen(stream_url) as response:
+                                while True:
+                                    chunk = response.read(8192)
+                                    if not chunk:
+                                        break
+                                    yield chunk
+                        break
+
+        titulo = obter_titulo_video(url)
+        filename = f"{titulo}.mp4"
+        filename_safe = "".join(c for c in filename if c.isalnum() or c in (' ', '.', '-')).rstrip()
+
+        return StreamingResponse(
+            gerar(),
+            media_type="video/mp4",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro: {str(e)}")
+
+
+def descrever_qualidade_video(altura):
+    """Descreve a qualidade do vídeo de forma simples"""
+    if altura <= 360:
+        return "Qualidade ruim, mas leve"
+    elif altura <= 480:
+        return "Qualidade ok, mas leve"
+    elif altura <= 720:
+        return "Qualidade boa"
+    elif altura <= 1080:
+        return "Qualidade bela"
+    else:
+        return "Qualidade top (4K)"
+
+def descrever_qualidade_audio(bitrate):
+    """Descreve a qualidade do áudio de forma simples"""
+    if bitrate < 96:
+        return "Áudio ruim, mas leve"
+    elif bitrate < 192:
+        return "Áudio ok"
+    elif bitrate < 256:
+        return "Áudio bom"
+    else:
+        return "Áudio top"
+
+def obter_titulo_video(url):
+    """Pega o título do vídeo"""
     try:
         ydl_opts = {
-            'format': qualidade,
-            'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
         }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            arquivo = ydl.prepare_filename(info)
-
-            return {
-                'sucesso': True,
-                'arquivo': os.path.basename(arquivo),
-                'caminho': arquivo
-            }
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Erro no download: {str(e)}")
-
-
-def calcular_tamanho(duracao, altura):
-    """Calcula tamanho aproximado do vídeo em MB"""
-    # Aproximação: ~0.5MB por minuto em 720p, varia com qualidade
-    minutos = duracao / 60
-
-    # Multiplicador por qualidade
-    if altura <= 360:
-        tamanho = minutos * 0.3  # ~18MB por 10 min em 360p
-    elif altura <= 480:
-        tamanho = minutos * 0.5  # ~30MB por 10 min em 480p
-    elif altura <= 720:
-        tamanho = minutos * 1.0  # ~60MB por 10 min em 720p
-    elif altura <= 1080:
-        tamanho = minutos * 2.0  # ~120MB por 10 min em 1080p
-    else:
-        tamanho = minutos * 3.0  # ~180MB por 10 min em 2160p
-
-    return round(tamanho, 1)
+            info = ydl.extract_info(url, download=False)
+            return info.get('title', 'video')
+    except:
+        return 'video'
 
 
 if __name__ == "__main__":
