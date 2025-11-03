@@ -51,32 +51,51 @@ def get_video_info(url: str):
             titulo = info.get('title', 'Vídeo')
             duracao = info.get('duration', 0)
 
-            # Pegar qualidades de VÍDEO
-            qualidades_video = []
+            # Pegar qualidades de VÍDEO (formatos com vcodec mas sem áudio)
+            qualidades_video = {}  # usar dict para evitar duplicatas por altura
             for fmt in info.get('formats', []):
-                if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
+                # Procurar formatos de vídeo PURO (sem áudio integrado)
+                if fmt.get('vcodec') != 'none' and fmt.get('acodec') == 'none':
                     altura = fmt.get('height', 0)
+                    
+                    # Só adicionar se temos altura e se é um formato válido
+                    if altura and altura > 0:
+                        # Se já existe uma qualidade com essa altura, pegar a com melhor qualidade
+                        if altura not in qualidades_video or fmt.get('tbr', 0) > qualidades_video[altura]['tbr']:
+                            qualidades_video[altura] = {
+                                'altura': altura,
+                                'descricao': descrever_qualidade_video(altura),
+                                'format_id': fmt.get('format_id'),
+                                'tbr': fmt.get('tbr', 0)
+                            }
+            
+            # Converter de dict para lista e remover campo tbr temporário
+            qualidades_video = [
+                {'altura': v['altura'], 'descricao': v['descricao'], 'format_id': v['format_id']}
+                for v in qualidades_video.values()
+            ]
 
-                    if altura and altura not in [f['altura'] for f in qualidades_video]:
-                        qualidades_video.append({
-                            'altura': altura,
-                            'descricao': descrever_qualidade_video(altura),
-                            'format_id': fmt.get('format_id')
-                        })
-
-            # Pegar qualidades de ÁUDIO
-            qualidades_audio = []
+            # Pegar qualidades de ÁUDIO (formatos com acodec mas sem vídeo)
+            qualidades_audio = {}  # usar dict para evitar duplicatas por bitrate
             for fmt in info.get('formats', []):
                 if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
                     abr = fmt.get('abr', fmt.get('tbr', 128))
-
-                    if abr and abr not in [f['bitrate'] for f in qualidades_audio]:
-                        descricao = descrever_qualidade_audio(abr)
-                        qualidades_audio.append({
-                            'bitrate': abr,
-                            'descricao': descricao,
-                            'format_id': fmt.get('format_id')
-                        })
+                    
+                    if abr and abr > 0:
+                        # Se não existe ou esse é melhor, adicionar
+                        if abr not in qualidades_audio or fmt.get('tbr', 0) > qualidades_audio[abr]['tbr']:
+                            qualidades_audio[abr] = {
+                                'bitrate': abr,
+                                'descricao': descrever_qualidade_audio(abr),
+                                'format_id': fmt.get('format_id'),
+                                'tbr': fmt.get('tbr', 0)
+                            }
+            
+            # Converter de dict para lista e remover campo tbr temporário
+            qualidades_audio = [
+                {'bitrate': v['bitrate'], 'descricao': v['descricao'], 'format_id': v['format_id']}
+                for v in qualidades_audio.values()
+            ]
 
             # Ordenar
             qualidades_video = sorted(
@@ -97,25 +116,58 @@ def get_video_info(url: str):
 @app.get("/api/download")
 def download_video(url: str, format_id: str = "best", tipo: str = "video"):
     """Faz streaming do vídeo ou áudio direto para o usuário
-    
+
     tipo: "video" (vídeo + áudio) ou "audio" (só áudio)
     format_id: o format_id selecionado (vídeo ou áudio)
     """
     try:
         def gerar():
-            ydl_opts = {
-                'format': format_id,
-                'quiet': True,
-                'no_warnings': True,
-                'socket_timeout': 30,
-            }
+            if tipo == "video":
+                # Para vídeo, precisa combinar com áudio: "formato_video+formato_audio"
+                # Pegar o melhor áudio disponível
+                ydl_opts_info = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'socket_timeout': 30,
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    
+                    # Encontrar melhor áudio
+                    best_audio = None
+                    for fmt in info.get('formats', []):
+                        if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
+                            if best_audio is None or fmt.get('abr', fmt.get('tbr', 0)) > best_audio.get('abr', best_audio.get('tbr', 0)):
+                                best_audio = fmt
+                    
+                    if best_audio:
+                        # Combinar formato_video + formato_audio
+                        format_combined = f"{format_id}+{best_audio.get('format_id')}"
+                    else:
+                        format_combined = format_id
+                
+                ydl_opts = {
+                    'format': format_combined,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'socket_timeout': 30,
+                }
+            else:
+                # Para áudio, usar o format_id direto
+                ydl_opts = {
+                    'format': format_id,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'socket_timeout': 30,
+                }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
                 # Pegar URL de streaming do vídeo/áudio
                 for fmt in info.get('formats', []):
-                    if fmt.get('format_id') == format_id:
+                    if fmt.get('format_id') == format_id or fmt.get('format_id') == f"{format_id}+{info.get('best_audio_format_id', '')}":
                         stream_url = fmt.get('url')
                         if stream_url:
                             # Fazer requisição ao stream
@@ -126,7 +178,20 @@ def download_video(url: str, format_id: str = "best", tipo: str = "video"):
                                     if not chunk:
                                         break
                                     yield chunk
-                        break
+                            return
+                
+                # Se não encontrou direto, tentar com a lista de formatos disponível
+                # yt-dlp já selecionou o melhor formato compatível
+                if 'url' in info:
+                    stream_url = info.get('url')
+                    if stream_url:
+                        import urllib.request
+                        with urllib.request.urlopen(stream_url) as response:
+                            while True:
+                                chunk = response.read(8192)
+                                if not chunk:
+                                    break
+                                yield chunk
 
         # Definir extensão e tipo de mídia
         if tipo == "audio":
