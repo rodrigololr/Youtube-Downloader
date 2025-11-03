@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
@@ -17,15 +17,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Servir arquivos estáticos do frontend
+# Obter caminho do frontend
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
-if os.path.exists(frontend_path):
-    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
 
 @app.get("/")
 def read_root():
+    """Serve o index.html do frontend"""
+    index_path = os.path.join(frontend_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
     return {"mensagem": "YouTube Downloader API rodando!"}
+
+
+# Servir arquivos estáticos do frontend
+if os.path.exists(frontend_path):
+    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
 
 @app.get("/api/video-info")
@@ -88,8 +95,12 @@ def get_video_info(url: str):
 
 
 @app.get("/api/download")
-def download_video(url: str, format_id: str = "best"):
-    """Faz streaming do vídeo direto para o usuário"""
+def download_video(url: str, format_id: str = "best", tipo: str = "video"):
+    """Faz streaming do vídeo ou áudio direto para o usuário
+    
+    tipo: "video" (vídeo + áudio) ou "audio" (só áudio)
+    format_id: o format_id selecionado (vídeo ou áudio)
+    """
     try:
         def gerar():
             ydl_opts = {
@@ -102,7 +113,7 @@ def download_video(url: str, format_id: str = "best"):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
-                # Pegar URL de streaming do vídeo
+                # Pegar URL de streaming do vídeo/áudio
                 for fmt in info.get('formats', []):
                     if fmt.get('format_id') == format_id:
                         stream_url = fmt.get('url')
@@ -117,14 +128,22 @@ def download_video(url: str, format_id: str = "best"):
                                     yield chunk
                         break
 
+        # Definir extensão e tipo de mídia
+        if tipo == "audio":
+            extensao = ".m4a"
+            media_type = "audio/mp4"
+        else:
+            extensao = ".mp4"
+            media_type = "video/mp4"
+
         titulo = obter_titulo_video(url)
-        filename = f"{titulo}.mp4"
+        filename = f"{titulo}{extensao}"
         filename_safe = "".join(
             c for c in filename if c.isalnum() or c in (' ', '.', '-')).rstrip()
 
         return StreamingResponse(
             gerar(),
-            media_type="video/mp4",
+            media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
         )
 

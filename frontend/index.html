@@ -43,24 +43,23 @@
                     <p id="video-duracao">Duração: 00:00</p>
                 </div>
 
-                <!-- Qualidade de VÍDEO -->
-                <div class="qualidades">
-                    <h3>🎬 Qualidade de Vídeo:</h3>
+                <!-- Opção 1: Baixar Vídeo (com áudio) -->
+                <div class="opcao-download">
+                    <h3>🎬 Baixar Vídeo (com áudio)</h3>
                     <div id="video-qualidades-list" class="qualidades-grid">
                         <!-- Será preenchido dinamicamente -->
                     </div>
+                    <button id="download-video-btn" class="download-btn">📥 Baixar Vídeo</button>
                 </div>
 
-                <!-- Qualidade de ÁUDIO -->
-                <div class="qualidades">
-                    <h3>🔊 Qualidade de Áudio:</h3>
+                <!-- Opção 2: Baixar Áudio (só áudio) -->
+                <div class="opcao-download">
+                    <h3>🔊 Baixar Áudio (somente)</h3>
                     <div id="audio-qualidades-list" class="qualidades-grid">
                         <!-- Será preenchido dinamicamente -->
                     </div>
+                    <button id="download-audio-btn" class="download-btn">🎵 Baixar Áudio</button>
                 </div>
-
-                <!-- Botão de download -->
-                <button id="download-btn" class="download-btn">Baixar Vídeo</button>
             </section>
 
             <!-- Mensagens de erro -->
@@ -92,14 +91,15 @@
         const videoInfo = document.getElementById('video-info');
         const erroDiv = document.getElementById('erro');
         const sucessoDiv = document.getElementById('sucesso');
-        const downloadBtn = document.getElementById('download-btn');
+        const downloadVideoBtn = document.getElementById('download-video-btn');
+        const downloadAudioBtn = document.getElementById('download-audio-btn');
 
         let videoData = null;
         let videoSelecionado = null;
         let audioSelecionado = null;
 
         // API base
-        const API_URL = 'http://localhost:8000/api';
+        const API_URL = '/api';
 
         // Formatar duração (segundos para MM:SS)
         function formatarDuracao(segundos) {
@@ -203,28 +203,22 @@
             audioSelecionado = qualidade;
         }
 
-        // Fazer download
-        downloadBtn.addEventListener('click', async () => {
+        // Fazer download de VÍDEO (vídeo + áudio)
+        downloadVideoBtn.addEventListener('click', async () => {
             if (!videoSelecionado) {
                 mostrarErro('Selecione uma qualidade de vídeo');
                 return;
             }
 
-            if (!audioSelecionado) {
-                mostrarErro('Selecione uma qualidade de áudio');
-                return;
-            }
-
             try {
                 mostrarLoader(true);
-                downloadBtn.disabled = true;
+                downloadVideoBtn.disabled = true;
 
                 const url = videoUrl.value.trim();
-                const format = `${videoSelecionado.format_id}+${audioSelecionado.format_id}`;
                 
                 // Fazer download direto
                 const response = await fetch(
-                    `${API_URL}/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(format)}`
+                    `${API_URL}/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(videoSelecionado.format_id)}&tipo=video`
                 );
 
                 if (!response.ok) {
@@ -252,7 +246,54 @@
                 mostrarErro(erro.message);
                 mostrarLoader(false);
             } finally {
-                downloadBtn.disabled = false;
+                downloadVideoBtn.disabled = false;
+            }
+        });
+
+        // Fazer download de ÁUDIO (só áudio)
+        downloadAudioBtn.addEventListener('click', async () => {
+            if (!audioSelecionado) {
+                mostrarErro('Selecione uma qualidade de áudio');
+                return;
+            }
+
+            try {
+                mostrarLoader(true);
+                downloadAudioBtn.disabled = true;
+
+                const url = videoUrl.value.trim();
+                
+                // Fazer download direto (só áudio)
+                const response = await fetch(
+                    `${API_URL}/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(audioSelecionado.format_id)}&tipo=audio`
+                );
+
+                if (!response.ok) {
+                    throw new Error('Erro ao baixar o áudio');
+                }
+
+                // Pegar o blob e fazer download
+                const blob = await response.blob();
+                const download_url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = download_url;
+                a.download = 'audio.m4a';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(download_url);
+                document.body.removeChild(a);
+                
+                mostrarLoader(false);
+                videoInfo.classList.add('hidden');
+                sucessoDiv.classList.remove('hidden');
+                document.getElementById('sucesso-msg').textContent = 
+                    `✅ Pronto! Seu áudio está sendo baixado!`;
+
+            } catch (erro) {
+                mostrarErro(erro.message);
+                mostrarLoader(false);
+            } finally {
+                downloadAudioBtn.disabled = false;
             }
         });
 
