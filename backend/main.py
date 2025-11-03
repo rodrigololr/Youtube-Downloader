@@ -18,7 +18,9 @@ app.add_middleware(
 )
 
 # Servir arquivos estáticos do frontend
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.exists(frontend_path):
+    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
 
 @app.get("/")
@@ -49,10 +51,9 @@ def get_video_info(url: str):
                     altura = fmt.get('height', 0)
 
                     if altura and altura not in [f['altura'] for f in qualidades_video]:
-                        descricao = descrever_qualidade_video(altura)
                         qualidades_video.append({
                             'altura': altura,
-                            'descricao': descricao,
+                            'descricao': descrever_qualidade_video(altura),
                             'format_id': fmt.get('format_id')
                         })
 
@@ -132,29 +133,29 @@ def download_video(url: str, format_id: str = "best"):
 
 
 def descrever_qualidade_video(altura):
-    """Descreve a qualidade do vídeo de forma simples"""
+    """Descreve a qualidade do vídeo com resolução e arquivo"""
     if altura <= 360:
-        return "Qualidade ruim, mas leve"
+        return f"{altura}p (qualidade do vídeo ruim, mas arquivo leve)"
     elif altura <= 480:
-        return "Qualidade ok, mas leve"
+        return f"{altura}p (qualidade do vídeo ok, mas arquivo leve)"
     elif altura <= 720:
-        return "Qualidade boa"
+        return f"{altura}p (qualidade do vídeo boa e arquivo mediano)"
     elif altura <= 1080:
-        return "Qualidade bela"
+        return f"{altura}p (qualidade do vídeo bela e arquivo maior)"
     else:
-        return "Qualidade top (4K)"
+        return f"{altura}p (qualidade 4K - arquivo muito grande)"
 
 
 def descrever_qualidade_audio(bitrate):
-    """Descreve a qualidade do áudio de forma simples"""
+    """Descreve a qualidade do áudio com bitrate e arquivo"""
     if bitrate < 96:
-        return "Áudio ruim, mas leve"
+        return f"{int(bitrate)}kbps (áudio ruim, mas arquivo leve)"
     elif bitrate < 192:
-        return "Áudio ok"
+        return f"{int(bitrate)}kbps (áudio ok, mas arquivo leve)"
     elif bitrate < 256:
-        return "Áudio bom"
+        return f"{int(bitrate)}kbps (áudio bom e arquivo mediano)"
     else:
-        return "Áudio top"
+        return f"{int(bitrate)}kbps (áudio top - arquivo maior)"
 
 
 def obter_titulo_video(url):
