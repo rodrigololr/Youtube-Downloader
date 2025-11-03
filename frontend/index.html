@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#FF0000">
+    <meta name="description" content="Baixe vídeos do YouTube de forma simples">
+    <title>YouTube Downloader</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%23FF0000' width='180' height='180'/><path fill='white' d='M60 60h60v60H60z'/></svg>">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📥 YouTube Downloader</h1>
+            <p>Baixe seus vídeos favoritos com facilidade</p>
+        </header>
+
+        <main>
+            <!-- Input para link -->
+            <section class="input-section">
+                <label for="video-url">Cole aqui o link do vídeo que você quer baixar:</label>
+                <input 
+                    type="text" 
+                    id="video-url" 
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    autocomplete="off"
+                >
+                <button id="buscar-btn">Buscar Vídeo</button>
+            </section>
+
+            <!-- Loader -->
+            <div id="loader" class="loader hidden">
+                <div class="spinner"></div>
+                <p>Buscando informações do vídeo...</p>
+            </div>
+
+            <!-- Informações do vídeo e qualidades -->
+            <section id="video-info" class="video-info hidden">
+                <div class="info-header">
+                    <h2 id="video-titulo">Título do Vídeo</h2>
+                    <p id="video-duracao">Duração: 00:00</p>
+                </div>
+
+                <!-- Aviso sobre tamanho -->
+                <div class="aviso">
+                    <p><strong>⚠️ Informação sobre tamanho:</strong></p>
+                    <p>Qualidades mais altas geram arquivos maiores. Veja a estimativa para cada qualidade.</p>
+                </div>
+
+                <!-- Opções de qualidade -->
+                <div class="qualidades">
+                    <h3>Escolha a Qualidade:</h3>
+                    <div id="qualidades-list" class="qualidades-grid">
+                        <!-- Será preenchido dinamicamente -->
+                    </div>
+                </div>
+
+                <!-- Botão de download -->
+                <button id="download-btn" class="download-btn">Baixar Vídeo</button>
+            </section>
+
+            <!-- Mensagens de erro -->
+            <div id="erro" class="erro hidden"></div>
+
+            <!-- Sucesso -->
+            <div id="sucesso" class="sucesso hidden">
+                <p id="sucesso-msg"></p>
+                <button onclick="location.reload()">Baixar Outro</button>
+            </div>
+        </main>
+
+        <footer>
+            <p>MIT License © 2025</p>
+        </footer>
+    </div>
+
+    <script>
+        // Service Worker para PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => 
+                console.log('SW registration failed:', err)
+            );
+        }
+
+        const videoUrl = document.getElementById('video-url');
+        const buscarBtn = document.getElementById('buscar-btn');
+        const loader = document.getElementById('loader');
+        const videoInfo = document.getElementById('video-info');
+        const erroDiv = document.getElementById('erro');
+        const sucessoDiv = document.getElementById('sucesso');
+        const downloadBtn = document.getElementById('download-btn');
+
+        let videoData = null;
+        let qualidadeSelecionada = null;
+
+        // API base
+        const API_URL = 'http://localhost:8000/api';
+
+        // Formatar duração (segundos para MM:SS)
+        function formatarDuracao(segundos) {
+            const minutos = Math.floor(segundos / 60);
+            const secs = Math.floor(segundos % 60);
+            return `${minutos.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Buscar informações do vídeo
+        buscarBtn.addEventListener('click', async () => {
+            const url = videoUrl.value.trim();
+            
+            if (!url) {
+                mostrarErro('Por favor, cole um link válido do YouTube');
+                return;
+            }
+
+            try {
+                mostrarLoader(true);
+                erroDiv.classList.add('hidden');
+                videoInfo.classList.add('hidden');
+                sucessoDiv.classList.add('hidden');
+
+                const response = await fetch(`${API_URL}/video-info?url=${encodeURIComponent(url)}`);
+                
+                if (!response.ok) {
+                    throw new Error('Vídeo não encontrado ou link inválido');
+                }
+
+                videoData = await response.json();
+                
+                // Preencher informações
+                document.getElementById('video-titulo').textContent = videoData.titulo;
+                document.getElementById('video-duracao').textContent = 
+                    `Duração: ${formatarDuracao(videoData.duracao)}`;
+
+                // Preencher qualidades
+                const qualidadesList = document.getElementById('qualidades-list');
+                qualidadesList.innerHTML = '';
+
+                videoData.qualidades.forEach(qual => {
+                    const btn = document.createElement('button');
+                    btn.className = 'qualidade-btn';
+                    btn.innerHTML = `
+                        <div class="qualidade-nome">${qual.descricao}</div>
+                        <div class="qualidade-tamanho">~${qual.tamanho_aprox}MB</div>
+                    `;
+                    
+                    btn.addEventListener('click', () => selecionarQualidade(qual, btn));
+                    qualidadesList.appendChild(btn);
+                });
+
+                mostrarLoader(false);
+                videoInfo.classList.remove('hidden');
+                
+            } catch (erro) {
+                mostrarErro(erro.message);
+                mostrarLoader(false);
+            }
+        });
+
+        // Selecionar qualidade
+        function selecionarQualidade(qualidade, btn) {
+            document.querySelectorAll('.qualidade-btn').forEach(b => 
+                b.classList.remove('selecionada')
+            );
+            btn.classList.add('selecionada');
+            qualidadeSelecionada = qualidade;
+        }
+
+        // Fazer download
+        downloadBtn.addEventListener('click', async () => {
+            if (!qualidadeSelecionada) {
+                mostrarErro('Selecione uma qualidade antes de baixar');
+                return;
+            }
+
+            try {
+                mostrarLoader(true);
+                downloadBtn.disabled = true;
+
+                const url = videoUrl.value.trim();
+                const response = await fetch(
+                    `${API_URL}/download?url=${encodeURIComponent(url)}&qualidade=${qualidadeSelecionada.format_id}`
+                );
+
+                if (!response.ok) {
+                    throw new Error('Erro ao baixar o vídeo');
+                }
+
+                const resultado = await response.json();
+                
+                mostrarLoader(false);
+                videoInfo.classList.add('hidden');
+                sucessoDiv.classList.remove('hidden');
+                document.getElementById('sucesso-msg').textContent = 
+                    `✅ Vídeo baixado com sucesso! (${resultado.arquivo})`;
+
+            } catch (erro) {
+                mostrarErro(erro.message);
+                mostrarLoader(false);
+            } finally {
+                downloadBtn.disabled = false;
+            }
+        });
+
+        // Auxiliares UI
+        function mostrarLoader(show) {
+            if (show) {
+                loader.classList.remove('hidden');
+            } else {
+                loader.classList.add('hidden');
+            }
+        }
+
+        function mostrarErro(msg) {
+            erroDiv.textContent = '❌ ' + msg;
+            erroDiv.classList.remove('hidden');
+        }
+
+        // Enter para buscar
+        videoUrl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') buscarBtn.click();
+        });
+    </script>
+</body>
+</html>
